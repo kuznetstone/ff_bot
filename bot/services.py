@@ -20,6 +20,8 @@ DEFAULT_SERVICES = [
 ]
 
 _SERVICES_CACHE: List[Dict[str, Any]] = []
+_UNIQUE_SERVICES: List[Dict[str, Any]] = []
+_UNIQUE_BY_ID: Dict[int, Dict[str, Any]] = {}
 
 
 def _normalize_header(value: str) -> str:
@@ -63,7 +65,7 @@ def _load_from_excel() -> List[Dict[str, Any]]:
     service_col = col_index("service", "услуга")
 
     if specialist_col is None or category_col is None or service_col is None:
-        logger.error("Excel header columns not found. Required: specialist/category/service")
+        logger.error("Excel header columns not found. Required: specialist/type/service")
         return []
 
     result = []
@@ -84,7 +86,7 @@ def _load_from_excel() -> List[Dict[str, Any]]:
 
 
 def _ensure_cache() -> None:
-    global _SERVICES_CACHE
+    global _SERVICES_CACHE, _UNIQUE_SERVICES, _UNIQUE_BY_ID
     if _SERVICES_CACHE:
         return
 
@@ -95,6 +97,29 @@ def _ensure_cache() -> None:
         {"id": idx + 1, **item}
         for idx, item in enumerate(raw)
     ]
+
+    unique_map: Dict[tuple[str, str], Dict[str, Any]] = {}
+    for service in _SERVICES_CACHE:
+        key = (service["category"], service["name"])
+        if key not in unique_map:
+            unique_map[key] = {
+                "category": service["category"],
+                "name": service["name"],
+                "specialists": set(),
+            }
+        unique_map[key]["specialists"].add(service["specialist"])
+
+    _UNIQUE_SERVICES = []
+    _UNIQUE_BY_ID = {}
+    for idx, item in enumerate(sorted(unique_map.values(), key=lambda x: (x["category"], x["name"]))):
+        entry = {
+            "id": idx + 1,
+            "category": item["category"],
+            "name": item["name"],
+            "specialists": sorted(item["specialists"]),
+        }
+        _UNIQUE_SERVICES.append(entry)
+        _UNIQUE_BY_ID[entry["id"]] = entry
 
 
 def get_categories(specialist_name: str | None = None) -> List[str]:
@@ -111,7 +136,22 @@ def get_services_by_category(category: str, specialist_name: str | None = None) 
     services = _SERVICES_CACHE
     if specialist_name:
         services = [s for s in services if s["specialist"] == specialist_name]
-    return [s for s in services if s["category"] == category]
+    filtered = [s for s in services if s["category"] == category]
+    if specialist_name:
+        seen = set()
+        unique = []
+        for s in filtered:
+            if s["name"] in seen:
+                continue
+            seen.add(s["name"])
+            unique.append(s)
+        return unique
+    return filtered
+
+
+def get_unique_services_by_category(category: str) -> List[Dict[str, Any]]:
+    _ensure_cache()
+    return [s for s in _UNIQUE_SERVICES if s["category"] == category]
 
 
 def get_service_by_id(service_id: int) -> Dict[str, Any] | None:
@@ -120,6 +160,18 @@ def get_service_by_id(service_id: int) -> Dict[str, Any] | None:
         if service["id"] == service_id:
             return service
     return None
+
+
+def get_unique_service_by_id(service_id: int) -> Dict[str, Any] | None:
+    _ensure_cache()
+    return _UNIQUE_BY_ID.get(service_id)
+
+
+def get_specialists_for_unique_service_id(service_id: int) -> List[str]:
+    service = get_unique_service_by_id(service_id)
+    if not service:
+        return []
+    return service["specialists"]
 
 
 def get_specialists_for_service_id(service_id: int) -> List[str]:
