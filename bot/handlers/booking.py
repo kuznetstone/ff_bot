@@ -8,7 +8,12 @@ from aiogram.fsm.context import FSMContext
 from ..states import NavStates, push_state, pop_state
 from ..keyboards import menus
 from .. import messages
-from ..services import get_service_by_id, get_specialists_for_service_id
+from ..services import (
+    get_service_by_id,
+    get_unique_service_by_id,
+    get_specialists_for_service_id,
+    get_specialists_for_unique_service_id,
+)
 from ..specialists import get_specialist_by_id
 from ..time_slots import get_time_slots_for_date
 from ..database import add_booking
@@ -55,21 +60,23 @@ async def render_state(message: Message, state: FSMContext, target_state: str) -
         )
     elif target_state == NavStates.SERVICE.state:
         category = data.get("category")
+        specialist_name = data.get("specialist_name")
         if not category:
             await message.edit_text(
                 messages.CHOOSE_SERVICE,
-                reply_markup=menus.categories_kb(data.get("specialist_name")),
+                reply_markup=menus.categories_kb(specialist_name),
             )
         else:
-            await message.edit_text(
-                messages.CHOOSE_SERVICE,
-                reply_markup=menus.services_kb(category, data.get("specialist_name")),
-            )
+            services = menus.services_kb(category, specialist_name)
+            await message.edit_text(messages.CHOOSE_SERVICE, reply_markup=services)
     elif target_state == NavStates.SPECIALIST.state:
         allowed = None
         service_id = data.get("service_id")
         if service_id:
             allowed = get_specialists_for_service_id(service_id)
+        unique_service_id = data.get("unique_service_id")
+        if unique_service_id:
+            allowed = get_specialists_for_unique_service_id(unique_service_id)
         await message.edit_text(messages.CHOOSE_SPECIALIST, reply_markup=menus.specialists_kb(allowed))
     elif target_state == NavStates.DATE.state:
         await message.edit_text(messages.CHOOSE_DATE, reply_markup=menus.dates_kb())
@@ -98,6 +105,15 @@ async def cb_booking_menu(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data == "book:choose_service")
 async def cb_choose_service(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
+    await state.update_data(
+        category=None,
+        service_id=None,
+        unique_service_id=None,
+        service_name=None,
+        date_iso=None,
+        date_display=None,
+        time_value=None,
+    )
     await _set_state_with_history(state, NavStates.SERVICE_CATEGORY)
     await callback.message.edit_text(
         messages.CHOOSE_SERVICE,
@@ -112,6 +128,8 @@ async def cb_choose_specialist(callback: CallbackQuery, state: FSMContext) -> No
     allowed = None
     if data.get("service_id"):
         allowed = get_specialists_for_service_id(data["service_id"])
+    if data.get("unique_service_id"):
+        allowed = get_specialists_for_unique_service_id(data["unique_service_id"])
     await _set_state_with_history(state, NavStates.SPECIALIST)
     await callback.message.edit_text(messages.CHOOSE_SPECIALIST, reply_markup=menus.specialists_kb(allowed))
     await callback.answer()
@@ -137,7 +155,7 @@ async def cb_service(callback: CallbackQuery, state: FSMContext) -> None:
     if not service:
         await callback.answer("Услуга не найдена", show_alert=True)
         return
-    await state.update_data(service_id=service_id, service_name=service["name"])
+    await state.update_data(service_id=service_id, service_name=service["name"], unique_service_id=None)
 
     data = await state.get_data()
     if data.get("specialist_name"):
@@ -147,6 +165,26 @@ async def cb_service(callback: CallbackQuery, state: FSMContext) -> None:
         allowed = get_specialists_for_service_id(service_id)
         await _set_state_with_history(state, NavStates.SPECIALIST)
         await callback.message.edit_text(messages.CHOOSE_SPECIALIST, reply_markup=menus.specialists_kb(allowed))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("book:service_unique:"))
+async def cb_service_unique(callback: CallbackQuery, state: FSMContext) -> None:
+    unique_id = int(callback.data.split("book:service_unique:")[-1])
+    service = get_unique_service_by_id(unique_id)
+    if not service:
+        await callback.answer("Услуга не найдена", show_alert=True)
+        return
+    await state.update_data(
+        unique_service_id=unique_id,
+        service_id=None,
+        service_name=service["name"],
+        category=service["category"],
+    )
+
+    allowed = get_specialists_for_unique_service_id(unique_id)
+    await _set_state_with_history(state, NavStates.SPECIALIST)
+    await callback.message.edit_text(messages.CHOOSE_SPECIALIST, reply_markup=menus.specialists_kb(allowed))
     await callback.answer()
 
 
