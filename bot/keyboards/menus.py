@@ -3,7 +3,7 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from ..services import get_categories, get_services_by_category
+from ..services import get_categories, get_services_by_category, get_unique_services_by_category
 from ..specialists import get_specialists
 from ..time_slots import get_date_options, get_time_slots_for_date
 
@@ -45,13 +45,24 @@ def categories_kb(specialist_name: str | None = None) -> InlineKeyboardMarkup:
 
 def services_kb(category: str, specialist_name: str | None = None) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    for service in get_services_by_category(category, specialist_name):
-        builder.add(
-            InlineKeyboardButton(
-                text=service["name"],
-                callback_data=f"book:service:{service['id']}",
+    if specialist_name:
+        services = get_services_by_category(category, specialist_name)
+        for service in services:
+            builder.add(
+                InlineKeyboardButton(
+                    text=service["name"],
+                    callback_data=f"book:service:{service['id']}",
+                )
             )
-        )
+    else:
+        services = get_unique_services_by_category(category)
+        for service in services:
+            builder.add(
+                InlineKeyboardButton(
+                    text=service["name"],
+                    callback_data=f"book:service_unique:{service['id']}",
+                )
+            )
     builder.add(InlineKeyboardButton(text="Назад", callback_data="nav:back"))
     builder.adjust(1)
     return builder.as_markup()
